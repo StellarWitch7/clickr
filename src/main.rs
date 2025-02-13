@@ -1,11 +1,12 @@
-use std::{fs, io::{Read, Write}, net::Shutdown, os::unix::net::{UnixListener, UnixStream}, process, sync::Mutex, thread::spawn, time::Duration};
+use std::{fs, io::{Read, Write}, net::Shutdown, os::unix::net::{UnixListener, UnixStream}, process, sync::Mutex, thread::{self, spawn}, time::Duration};
 
-use actix_web::{get, rt::time::sleep, web::{self, Data, Payload}, App, Error, HttpRequest, HttpResponse, HttpServer};
+use actix_web::{get, rt::time::{sleep, timeout}, web::{self, Data, Payload}, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_ws::Session;
 use awc::Client;
+use awc::ws::Frame::Binary;
 use clap::{command, Parser, Subcommand, ValueEnum};
 use env_logger::Target;
-use futures::{executor::block_on, StreamExt};
+use futures::{executor::block_on, SinkExt, StreamExt};
 use log::{error, info, warn, LevelFilter};
 
 #[derive(Debug, Parser)]
@@ -79,21 +80,30 @@ async fn run() -> Result<(), String> {
                         info!("Connected! Http response: {res:?}");
 
                         loop {
-                            match ws.next().await {
-                                Some(msg) => {
-                                    if let Ok(msg) = msg {
-                                        info!("Got ping! {msg:?}");
-                                        info!("{:?}", process::Command::new("pw-cat")
-                                            .arg("-p")
-                                            .arg(shellexpand::tilde("~/.config/clickr/sound.ogg").as_ref())
-                                            .arg("--volume")
-                                            .arg(format!("{}", args.volume))
-                                            .output()
-                                            .or_else(|e| Err(format!("Failed to execute pw-cat: {e}")))?);
+                            match timeout(Duration::from_secs(25), ws.next()).await {
+                                Ok(Some(msg)) => {
+                                    if let Ok(Binary(msg)) = msg {
+                                        if msg[0] == 0xff {
+                                            info!("Got ping! {msg:?}");
+                                            info!("{:?}", process::Command::new("pw-cat")
+                                                .arg("-p")
+                                                .arg(shellexpand::tilde("~/.config/clickr/sound.ogg").as_ref())
+                                                .arg("--volume")
+                                                .arg(format!("{}", args.volume))
+                                                .output()
+                                                .or_else(|e| Err(format!("Failed to execute pw-cat: {e}")))?);
+                                        } else {
+                                            info!("Got heartbeat! {msg:?}");
+                                        }
                                     }
                                 },
-                                None => {
+                                Ok(None) => {
                                     warn!("Got disconnected! Attempting to reconnect in 5 seconds.");
+                                    sleep(Duration::from_secs(5)).await;
+                                    break;
+                                },
+                                Err(_) => {
+                                    warn!("Timed out! Attempting to reconnect in 5 seconds.");
                                     sleep(Duration::from_secs(5)).await;
                                     break;
                                 }
@@ -108,7 +118,7 @@ async fn run() -> Result<(), String> {
             }
         },
         Command::Host(args) => {
-            fs::remove_file(shellexpand::tilde("~/.config/clickr/sock").as_ref());
+            let _ = fs::remove_file(shellexpand::tilde("~/.config/clickr/sock").as_ref());
 
             let Args { addr, port, volume } = args.clone();
             let server = HttpServer::new(move || {
@@ -133,6 +143,17 @@ async fn run() -> Result<(), String> {
                                 }
                             }
                         }
+                    }
+                }
+            });
+
+            spawn(move || loop {
+                thread::sleep(Duration::from_secs(10));
+
+                let mut session = get_client_session().lock().unwrap();
+                if let Some(inner_session) = session.as_mut() {
+                    if block_on(inner_session.binary(vec![0x00])).is_err() {
+                        *session = None;
                     }
                 }
             });
