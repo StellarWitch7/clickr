@@ -51,7 +51,7 @@ async fn run() -> Result<(), String> {
             //send a single byte
             //disconnect and terminate
 
-            let mut stream = UnixStream::connect("~/.config/clickr/sock")
+            let mut stream = UnixStream::connect(shellexpand::tilde("~/.config/clickr/sock"))
                 .or_else(|e| Err(format!("Failed to open unix socket: {e}")))?;
             stream.write_all(&[0xff])
                 .or_else(|e| Err(format!("Failed to write to unix socket: {e}")))?;
@@ -81,13 +81,12 @@ async fn run() -> Result<(), String> {
                 .bind((addr, port))
                 .or_else(|e| Err(format!("Failed to bind to address: {e}")))?;
 
-            
             //TODO: connect to ~/.config/clickr/sock as a unix socket
             //listen for a byte input into the socket, then send a byte message over the currently
             //connected websocket
             //do this on a separate thread
             info!("Setting up socket listener thread...");
-            let listener = UnixListener::bind("~/.config/clickr/sock")
+            let listener = UnixListener::bind(shellexpand::tilde("~/.config/clickr/sock"))
                 .or_else(|e| Err(format!("Failed to bind unix socket: {e}")))?;
             spawn(move || loop {
                 if let Ok((mut stream, _)) = listener.accept() {
