@@ -30,6 +30,8 @@ struct Args {
     addr: String,
     #[arg(short, long, default_value_t = 63063, help = "The host port")]
     port: u16,
+    #[arg(short, long, default_value_t = 1, help = "The volume of the sound")]
+    volume: u16,
 }
 
 #[actix_web::main]
@@ -69,38 +71,43 @@ async fn run() -> Result<(), String> {
             let client = Client::default();
 
             loop {
-                let (res, mut ws) = client
-                    .ws(format!("ws://{}:{}/heart", args.addr, args.port))
-                    .connect()
-                    .await
-                    .or_else(|e| Err(format!("Failed to connect to websocket: {e}")))?;
-                info!("Connected! Http response: {res:?}");
+                match client
+                .ws(format!("ws://{}:{}/heart", args.addr, args.port))
+                .connect()
+                .await {
+                    Ok((res, mut ws)) => {
+                        info!("Connected! Http response: {res:?}");
 
-                loop {
-                    match ws.next().await {
-                        Some(msg) => {
-                            if let Ok(msg) = msg {
-                                info!("Got ping! {msg:?}");
-                                process::Command::new("pw-cat")
-                                    .arg("-p")
-                                    .arg("~/.config/clickr/sound.ogg")
-                                    .arg("--volume")
-                                    .arg("4")
-                                    .output()
-                                    .or_else(|e| Err(format!("Failed to execute pw-cat: {e}")))?;
+                        loop {
+                            match ws.next().await {
+                                Some(msg) => {
+                                    if let Ok(msg) = msg {
+                                        info!("Got ping! {msg:?}");
+                                        info!("{:?}", process::Command::new("pw-cat")
+                                            .arg("-p")
+                                            .arg(shellexpand::tilde("~/.config/clickr/sound.ogg").as_ref())
+                                            .arg("--volume")
+                                            .arg(format!("{}", args.volume))
+                                            .output()
+                                            .or_else(|e| Err(format!("Failed to execute pw-cat: {e}")))?);
+                                    }
+                                },
+                                None => {
+                                    warn!("Got disconnected! Attempting to reconnect in 5 seconds.");
+                                    sleep(Duration::from_secs(5)).await;
+                                    break;
+                                }
                             }
-                        },
-                        None => {
-                            warn!("Got disconnected! Attempting to reconnect in 5 seconds.");
-                            sleep(Duration::from_secs(5)).await;
-                            break;
                         }
+                    },
+                    Err(e) => {
+                        warn!("Failed to connect to websocket: {e}");
                     }
                 }
             }
         },
         Command::Host(args) => {
-            let Args { addr, port } = args.clone();
+            let Args { addr, port, volume } = args.clone();
             let server = HttpServer::new(move || {
                 App::new()
                     .app_data(web::Data::new(args.clone()))
