@@ -1,4 +1,4 @@
-use std::{fs, io::{Read, Write}, net::Shutdown, os::unix::net::{UnixListener, UnixStream}, path::{Path, PathBuf}, process, sync::Mutex, thread::spawn, time::Duration};
+use std::{fs, io::{Read, Write}, net::Shutdown, os::unix::net::{UnixListener, UnixStream}, process, sync::Mutex, thread::spawn, time::Duration};
 
 use actix_web::{get, rt::time::sleep, web::{self, Data, Payload}, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_ws::Session;
@@ -107,6 +107,8 @@ async fn run() -> Result<(), String> {
             }
         },
         Command::Host(args) => {
+            fs::remove_file(shellexpand::tilde("~/.config/clickr/sock").as_ref());
+
             let Args { addr, port, volume } = args.clone();
             let server = HttpServer::new(move || {
                 App::new()
