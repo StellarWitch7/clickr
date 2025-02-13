@@ -1,4 +1,4 @@
-use std::{io::{Read, Write}, net::Shutdown, os::unix::net::{UnixListener, UnixStream}, path::{Path, PathBuf}, process, sync::Mutex, thread::spawn, time::Duration};
+use std::{fs, io::{Read, Write}, net::Shutdown, os::unix::net::{UnixListener, UnixStream}, path::{Path, PathBuf}, process, sync::Mutex, thread::spawn, time::Duration};
 
 use actix_web::{get, rt::time::sleep, web::{self, Data, Payload}, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_ws::Session;
@@ -46,6 +46,8 @@ async fn main() {
 }
 
 async fn run() -> Result<(), String> {
+    fs::create_dir_all(shellexpand::tilde("~/.config/clickr").as_ref());
+
     match Cli::parse().command {
         Command::Ping => {
             //TODO: connect to ~/.config/clickr/sock as a unix socket
