@@ -78,6 +78,8 @@ async fn run() -> Result<(), String> {
                                 process::Command::new("pw-cat")
                                     .arg("-p")
                                     .arg("~/.config/clickr/sound.ogg")
+                                    .arg("--volume")
+                                    .arg("4")
                                     .output()
                                     .or_else(|e| Err(format!("Failed to execute pw-cat: {e}")))?;
                             }
@@ -100,7 +102,7 @@ async fn run() -> Result<(), String> {
             })
                 .bind((addr, port))
                 .or_else(|e| Err(format!("Failed to bind to address: {e}")))?;
-            
+
             info!("Setting up socket listener thread...");
             let listener = UnixListener::bind(shellexpand::tilde("~/.config/clickr/sock"))
                 .or_else(|e| Err(format!("Failed to bind unix socket: {e}")))?;
