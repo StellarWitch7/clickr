@@ -1,4 +1,4 @@
-use std::{io::{Read, Write}, net::Shutdown, os::unix::net::{UnixListener, UnixStream}, sync::Mutex, thread::spawn};
+use std::{io::{Read, Write}, net::Shutdown, os::unix::net::{UnixListener, UnixStream}, path::{Path, PathBuf}, sync::Mutex, thread::spawn};
 
 use actix_web::{get, web::{self, Data, Payload}, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_ws::Session;
@@ -51,7 +51,7 @@ async fn run() -> Result<(), String> {
             //send a single byte
             //disconnect and terminate
 
-            let mut stream = UnixStream::connect(shellexpand::tilde("~/.config/clickr/sock"))
+            let mut stream = UnixStream::connect(PathBuf::from(shellexpand::tilde(&format!("~/.config/clickr/sock"))))
                 .or_else(|e| Err(format!("Failed to open unix socket: {e}")))?;
             stream.write_all(&[0xff])
                 .or_else(|e| Err(format!("Failed to write to unix socket: {e}")))?;
@@ -86,7 +86,7 @@ async fn run() -> Result<(), String> {
             //connected websocket
             //do this on a separate thread
             info!("Setting up socket listener thread...");
-            let listener = UnixListener::bind(shellexpand::tilde("~/.config/clickr/sock"))
+            let listener = UnixListener::bind(PathBuf::from(shellexpand::tilde(&format!("~/.config/clickr/sock"))))
                 .or_else(|e| Err(format!("Failed to bind unix socket: {e}")))?;
             spawn(move || loop {
                 if let Ok((mut stream, _)) = listener.accept() {
