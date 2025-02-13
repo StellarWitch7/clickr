@@ -102,6 +102,7 @@ async fn run() -> Result<(), String> {
                     },
                     Err(e) => {
                         warn!("Failed to connect to websocket: {e}");
+                        sleep(Duration::from_secs(5)).await;
                     }
                 }
             }
