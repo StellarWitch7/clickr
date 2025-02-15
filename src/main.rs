@@ -11,7 +11,7 @@ use log::{error, info, warn, LevelFilter};
 
 #[derive(Debug, Parser)]
 #[command(name = "clickr")]
-#[command(about = "A P2P clicker", long_about = None)]
+#[command(about = "A peer-to-peer clicker", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -19,20 +19,34 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    Ping,
-    Connect(Args),
-    Host(Args)
+    Host(ServerArgs),
+    Connect(ClientArgs),
+    Ping(PingArgs),
 }
 
 #[derive(clap::Args, Debug, Clone)]
-#[command(version, about, long_about = None)]
-struct Args {
-    #[arg(short, long, help = "The host address")]
+#[command(about = "Run clickr as the host", long_about = None)]
+struct ServerArgs {
+    #[arg(short, long, help = "The address to listen on")]
     addr: String,
-    #[arg(short, long, default_value_t = 63063, help = "The host port")]
+    #[arg(short, long, default_value_t = 63063, help = "The port to listen on")]
     port: u16,
-    #[arg(short, long, default_value_t = 1, help = "The volume of the sound")]
+}
+
+#[derive(clap::Args, Debug, Clone)]
+#[command(about = "Run clickr as the client", long_about = None)]
+struct ClientArgs {
+    #[arg(short, long, help = "The address to connect to")]
+    addr: String,
+    #[arg(short, long, default_value_t = 63063, help = "The port to connect to")]
+    port: u16,
+    #[arg(short, long, default_value_t = 2, help = "The volume of the sound when a ping is received")]
     volume: u16,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+#[command(about = "Ping the currently connected clickr client", long_about = None)]
+struct PingArgs {
 }
 
 #[actix_web::main]
@@ -52,19 +66,15 @@ async fn run() -> Result<(), String> {
     fs::create_dir_all(shellexpand::tilde("~/.config/clickr").as_ref());
 
     match Cli::parse().command {
-        Command::Ping => {
-            //TODO: connect to ~/.config/clickr/sock as a unix socket
-            //send a single byte
-            //disconnect and terminate
-
+        Command::Ping(_) => {
             let mut stream = UnixStream::connect(shellexpand::tilde("~/.config/clickr/sock").as_ref())
                 .or_else(|e| Err(format!("Failed to open unix socket: {e}")))?;
             stream.write_all(&[0xff])
                 .or_else(|e| Err(format!("Failed to write to unix socket: {e}")))?;
             stream.flush()
-                .or_else(|e| Err(format!("Failed flush unix socket: {e}")))?;
+                .or_else(|e| Err(format!("Failed to flush unix socket: {e}")))?;
             stream.shutdown(Shutdown::Both)
-                .or_else(|e| Err(format!("Failed release unix socket: {e}")))?;
+                .or_else(|e| Err(format!("Failed to release unix socket: {e}")))?;
 
             Ok(())
         },
@@ -72,19 +82,16 @@ async fn run() -> Result<(), String> {
             let client = Client::default();
 
             loop {
-                match client
-                .ws(format!("ws://{}:{}/heart", args.addr, args.port))
-                .connect()
-                .await {
+                match client.ws(format!("ws://{}:{}/heart", args.addr, args.port)).connect().await {
                     Ok((res, mut ws)) => {
-                        info!("Connected! Http response: {res:?}");
+                        info!("Connected! HTTP response: {res:?}");
 
                         loop {
-                            match timeout(Duration::from_secs(25), ws.next()).await {
+                            match timeout(Duration::from_secs(20), ws.next()).await {
                                 Ok(Some(msg)) => {
                                     if let Ok(Binary(msg)) = msg {
                                         if msg[0] == 0xff {
-                                            info!("Got ping! {msg:?}");
+                                            info!("Ping!");
                                             info!("{:?}", process::Command::new("pw-cat")
                                                 .arg("-p")
                                                 .arg(shellexpand::tilde("~/.config/clickr/sound.ogg").as_ref())
@@ -93,7 +100,7 @@ async fn run() -> Result<(), String> {
                                                 .output()
                                                 .or_else(|e| Err(format!("Failed to execute pw-cat: {e}")))?);
                                         } else {
-                                            info!("Got heartbeat! {msg:?}");
+                                            info!("Ba-bump");
                                         }
                                     }
                                 },
@@ -120,7 +127,7 @@ async fn run() -> Result<(), String> {
         Command::Host(args) => {
             let _ = fs::remove_file(shellexpand::tilde("~/.config/clickr/sock").as_ref());
 
-            let Args { addr, port, volume } = args.clone();
+            let ServerArgs { addr, port } = args.clone();
             let server = HttpServer::new(move || {
                 App::new()
                     .app_data(web::Data::new(args.clone()))
@@ -140,6 +147,7 @@ async fn run() -> Result<(), String> {
                             if let Some(inner_session) = session.as_mut() {
                                 if block_on(inner_session.binary(vec![0xff])).is_err() {
                                     *session = None;
+                                    info!("Client disconnected!");
                                 }
                             }
                         }
@@ -154,6 +162,7 @@ async fn run() -> Result<(), String> {
                 if let Some(inner_session) = session.as_mut() {
                     if block_on(inner_session.binary(vec![0x00])).is_err() {
                         *session = None;
+                        info!("Client disconnected!");
                     }
                 }
             });
@@ -165,7 +174,8 @@ async fn run() -> Result<(), String> {
 }
 
 #[get("/heart")]
-pub async fn heart(req: HttpRequest, stream: Payload, args: Data<Args>) -> Result<HttpResponse, Error> {
+pub async fn heart(req: HttpRequest, stream: Payload, args: Data<ServerArgs>) -> Result<HttpResponse, Error> {
+    info!("Client {} attempting to connect...", req.peer_addr().map_or("<unknown>".to_string(), |addr| addr.ip().to_canonical().to_string()));
     let (res, session, stream) = actix_ws::handle(&req, stream)?;
 
     let mut current_session = get_client_session().lock().unwrap();
@@ -174,8 +184,7 @@ pub async fn heart(req: HttpRequest, stream: Payload, args: Data<Args>) -> Resul
     }
 
     *current_session = Some(session);
-
-    info!("Client connected");
+    info!("Client connected!");
     Ok(res)
 }
 
