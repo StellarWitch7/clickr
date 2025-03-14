@@ -148,6 +148,8 @@ async fn run() -> Result<(), String> {
                                 if block_on(inner_session.binary(vec![0xff])).is_err() {
                                     *session = None;
                                     info!("Client disconnected!");
+                                } else {
+                                    info!("Client pinged");
                                 }
                             }
                         }
